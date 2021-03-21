@@ -18,9 +18,14 @@ from tfCube2 import Parameters
 
 class Gamma():
 
-    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'half_light_radius', 'theta_int', 'flux'], par_fix=None):
+    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'r_hl_image', 'theta_int', 'flux'], par_fix=None, vTFR_mean=None):
 
         self.sigma_TF_intr = 0.08
+        
+        if vTFR_mean is None:
+            self.vTFR_mean = 200.
+        else:
+            self.vTFR_mean = vTFR_mean
 
         self.Pars = Parameters(par_in=data_info['par_fid'], line_species=data_info['line_species'])
 
@@ -32,7 +37,7 @@ class Gamma():
         else:
             self.par_base = self.par_fid.copy()
         
-        self.ImgFit = ImageFit(data_info, active_par_key=['sini', 'half_light_radius', 'theta_int', 'g1', 'g2', 'flux'], par_fix=par_fix)
+        self.ImgFit = ImageFit(data_info, active_par_key=['sini', 'r_hl_image', 'theta_int', 'g1', 'g2', 'flux'], par_fix=par_fix)
 
         #if 'flux' in active_par_key:
         #    active_par_key.remove('flux')
@@ -55,7 +60,7 @@ class Gamma():
             if (par[item] < self.par_lim[item][0] or par[item] > self.par_lim[item][1]):
                 return -np.inf
         
-        logPrior_vcirc = self.Pars.logPrior_vcirc(vcirc=par['vcirc'], sigma_TF_intr=self.sigma_TF_intr, vTFR_mean=75.)
+        logPrior_vcirc = self.Pars.logPrior_vcirc(vcirc=par['vcirc'], sigma_TF_intr=self.sigma_TF_intr, vTFR_mean=self.vTFR_mean)
 
         active_par_ImgFit = [par[item_key] for item_key in self.active_par_key_img]
         logL_img = self.ImgFit.cal_loglike(active_par=active_par_ImgFit)

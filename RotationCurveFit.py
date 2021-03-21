@@ -90,7 +90,7 @@ class GaussFit_signle():
 
 class RotationCurveFit():
 
-    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2', 'theta_int'], par_fix=None):
+    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2', 'theta_int'], par_fix=None, vTFR_mean=None):
         '''
             e.g. 
             active_par_key = ['vscale', 'r_0', 'sini', 'v_0'] # 'redshift'
@@ -98,6 +98,11 @@ class RotationCurveFit():
         '''
 
         self.sigma_TF_intr = 0.08
+
+        if vTFR_mean is None:
+            self.vTFR_mean = 200.
+        else:
+            self.vTFR_mean = vTFR_mean
 
         self.Pars = Parameters(par_in=data_info['par_fid'], line_species=data_info['line_species'])
 
@@ -217,7 +222,7 @@ class RotationCurveFit():
             if ( par[item] < self.par_lim[item][0] or par[item] > self.par_lim[item][1] ):
                 return -np.inf
         
-        logPrior_vcirc = self.Pars.logPrior_vcirc(vcirc=par['vcirc'], sigma_TF_intr=self.sigma_TF_intr)
+        logPrior_vcirc = self.Pars.logPrior_vcirc(vcirc=par['vcirc'], sigma_TF_intr=self.sigma_TF_intr, vTFR_mean=self.vTFR_mean)
 
         chi2 = self.cal_chi2(active_par)
 
