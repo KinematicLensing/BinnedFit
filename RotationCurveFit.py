@@ -12,38 +12,37 @@ dir_KLens = dir_repo + '/KLens'
 sys.path.append(dir_KLens)
 from tfCube2 import Parameters
 
+
 class GaussFit_signle():
-    def __init__(self, spec2D, lambda_emit, lambdaGrid, spaceGrid):
+    def __init__(self, spec2D, lambda0, thresholdSNR=None):
 
-        self.spec2D = spec2D
-        self.lambda_emit = lambda_emit
-        self.lambdaGrid = lambdaGrid
-        self.spaceGrid = spaceGrid
+        self.lambda0 = lambda0
 
-        self.Ngrid_pos, self.Ngrid_spec = self.spec2D.shape
+        if thresholdSNR is not None:
+            self.spec2D = spec2D.cutout(thresholdSNR=thresholdSNR)
+        else:
+            self.spec2D = spec2D
 
-    def get_peak_info(self, spec2D):
+    def get_peak_info(self):
         '''
             get peak spectra information for each of the spatial grid
             for a given position stripe, find the peak flux (peak_flux), at which lambda grid (peak_id), corresponding to what lambda (peak_loc).
-
-            spec2D : spec2D_array
         '''
         peak_info = {}
-        peak_info['peak_id'] = np.argmax(spec2D, axis=1)
-        peak_info['peak_loc'] = self.lambdaGrid[peak_info['peak_id']]
-        peak_info['peak_flux'] = np.amax(spec2D, axis=1)
+        peak_info['peak_id'] = np.argmax(self.spec2D.array, axis=1)
+        peak_info['peak_loc'] = self.spec2D.lambdaGrid[peak_info['peak_id']]
+        peak_info['peak_flux'] = np.amax(self.spec2D.array, axis=1)
         return peak_info
     
     def gaussian_single(self, x, x0, amp, sigma):
         return amp*np.exp(-(x-x0)**2 / (2*sigma**2)) / np.sqrt(2*np.pi*sigma**2)
 
-    def _fitGauss_per_bin(self, spec2D, pos_id, fit_function):
+    def _fitGauss_per_bin(self, pos_id, fit_function):
         '''
             fit 1D gaussian for the spec2D data at each position bin (given pos_id: spec2D[pos_id])
             use get_peak_info as an initial starting point before running optimizer
         '''
-        peak_info = self.get_peak_info(spec2D=spec2D)
+        peak_info = self.get_peak_info()
 
         # initial guess on the velocity dispersion at fixed position (here the unit is in nm)
         # init_sigma need to be in the same unit as self.lambdaGrid
@@ -53,23 +52,24 @@ class GaussFit_signle():
         init_vals = [peak_info['peak_loc'][pos_id], peak_info['peak_flux'][pos_id], init_sigma]  
 
         # curve_fit(fit_fun,x,f(x),p0=initial_par_values)
-        best_vals, covar = curve_fit(fit_function, self.lambdaGrid, spec2D[pos_id], p0=init_vals)
+        best_vals, covar = curve_fit(fit_function, self.spec2D.lambdaGrid, self.spec2D.array[pos_id], p0=init_vals)
 
         return best_vals
 
-    def gaussFit_spec2D(self, spec2D):
+    def gaussFit_spec2D(self):
         '''
             loop over each position stripe to get fitted_amp, fitted_peakLambda, fitted_sigma
             fitted_peakLambda unit: same as self.lambdaGrid
         '''
-        amp = np.zeros(self.Ngrid_pos)
-        peakLambda = np.zeros(self.Ngrid_pos)
-        sigma = np.zeros(self.Ngrid_pos)
+        ngrid_pos = self.spec2D.ngrid_pos
+        amp = np.zeros(ngrid_pos)
+        peakLambda = np.zeros(ngrid_pos)
+        sigma = np.zeros(ngrid_pos)
 
         start_time = time.time()
 
-        for j in range(self.Ngrid_pos):
-            peakLambda[j], amp[j], sigma[j] = self._fitGauss_per_bin(spec2D, j, fit_function=self.gaussian_single)
+        for j in range(ngrid_pos):
+            peakLambda[j], amp[j], sigma[j] = self._fitGauss_per_bin(j, fit_function=self.gaussian_single)
 
         end_time = time.time()
         print("time cost in gaussFit_spec2D:", (end_time-start_time), "(secs)")
@@ -80,17 +80,17 @@ class GaussFit_signle():
         '''
             generate model 2D spectrum based on best fitted parameters derived from fit_spec2D
         '''
-        model_spec2D = np.zeros([self.Ngrid_pos, self.Ngrid_spec])
+        model_spec2D = np.zeros([self.spec2D.ngrid_pos, self.spec2D.ngrid_spec])
 
-        for j in range(self.Ngrid_pos):
-            model_spec2D[j] = self.gaussian_single(self.lambdaGrid, fitted_peakLambda[j], fitted_amp[j], fitted_sigma[j])
+        for j in range(self.spec2D.ngrid_pos):
+            model_spec2D[j] = self.gaussian_single(self.spec2D.lambdaGrid, fitted_peakLambda[j], fitted_amp[j], fitted_sigma[j])
 
         return model_spec2D
 
 
 class RotationCurveFit():
 
-    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2', 'theta_int'], par_fix=None, vTFR_mean=None):
+    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2', 'theta_int'], par_fix=None, vTFR_mean=None, thresholdSNR=0):
         '''
             e.g. 
             active_par_key = ['vscale', 'r_0', 'sini', 'v_0'] # 'redshift'
@@ -103,6 +103,8 @@ class RotationCurveFit():
             self.vTFR_mean = 200.
         else:
             self.vTFR_mean = vTFR_mean
+
+        self.thresholdSNR = thresholdSNR
 
         self.Pars = Parameters(par_in=data_info['par_fid'], line_species=data_info['line_species'])
 
@@ -119,45 +121,25 @@ class RotationCurveFit():
         self.Nspec = len(data_info['spec'])
 
         self.spec = data_info['spec']
-        self.lambdaGrid = data_info['lambdaGrid']
-        self.spaceGrid = data_info['spaceGrid']
-        self.lambda_emit = data_info['lambda_emit']
+        self.lambda0 = data_info['lambda0']
         
         self.spec_stats = self.spec_statstics()
 
         self.par_lim = self.Pars.set_par_lim() # defined in tfCube2.Parameters.set_par_lim()
         self.par_std = self.Pars.set_par_std()
 
-
     def spec_statstics(self):
         
         spec_stats = []
         for j in range(self.Nspec):
-            GaussFit = GaussFit_signle(spec2D=self.spec[j], lambda_emit=self.lambda_emit, lambdaGrid=self.lambdaGrid, spaceGrid=self.spaceGrid)
+            GaussFit = GaussFit_signle(spec2D=self.spec[j], lambda0=self.lambda0, thresholdSNR=self.thresholdSNR)
+            self.spec[j] = GaussFit.spec2D
             stats = {}
-            peakLambda, amp, sigma = GaussFit.gaussFit_spec2D(spec2D=self.spec[j])
-            stats['peakLambda'], stats['amp'], stats['sigma'], stats['spaceGrid'] = self._remove_0signal_grid(peakLambda, amp, sigma, threshold_SN=1e-10)
+            stats['peakLambda'], stats['amp'], stats['sigma'] = GaussFit.gaussFit_spec2D()
             spec_stats.append(stats)
         
         return spec_stats
-            
-    def _remove_0signal_grid(self, peakLambda, amp, sigma, threshold_SN=1e-10):
-        '''
-            check positions where the peak amp is small, and remove these position info.
-        '''
-        SN = amp/sigma
-        ID_keep = np.where(np.abs(SN) >= threshold_SN)[0]
 
-        if len(ID_keep) < len(amp):
-
-            amp_o = amp[ID_keep]
-            peakLambda_o = peakLambda[ID_keep]
-            sigma_o = sigma[ID_keep]
-            spaceGrid_o = self.spaceGrid[ID_keep]
-            
-            return peakLambda_o, amp_o, sigma_o, spaceGrid_o
-        else:
-            return peakLambda, amp, sigma, self.spaceGrid
 
     def getPhi_faceOn(self, theta, sini):
         '''
@@ -194,7 +176,7 @@ class RotationCurveFit():
             R = r
 
         peak_V = v_0 + 2/np.pi * vcirc * sini * np.cos(phi) * np.arctan((R - r_0)/vscale)
-        model_lambda = velocity_to_lambda(v_peculiar=peak_V, lambda_emit=self.lambda_emit, redshift=redshift)
+        model_lambda = velocity_to_lambda(v_peculiar=peak_V, lambda0=self.lambda0, redshift=redshift)
 
         return model_lambda
     
@@ -205,7 +187,7 @@ class RotationCurveFit():
         chi2_tot = 0.
         for j in range(self.Nspec):
             
-            model = self.model_arctan_rotation(r=self.spec_stats[j]['spaceGrid'], vcirc=par['vcirc'], sini=par['sini'], vscale=par['vscale'], r_0=par['r_0'], v_0=par['v_0'], g1=par['g1'], g2=par['g2'], theta_int=par['theta_int'], redshift=par['redshift'], slitAngle=par['slitAngles'][j])
+            model = self.model_arctan_rotation(r=self.spec[j].spaceGrid, vcirc=par['vcirc'], sini=par['sini'], vscale=par['vscale'], r_0=par['r_0'], v_0=par['v_0'], g1=par['g1'], g2=par['g2'], theta_int=par['theta_int'], redshift=par['redshift'], slitAngle=par['slitAngles'][j])
             #print(model)
 
             diff = self.spec_stats[j]['peakLambda'] - model

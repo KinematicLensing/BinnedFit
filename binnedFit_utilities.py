@@ -30,7 +30,7 @@ def lambda_hubble(lambda_emit, redshift):
     '''
     return lambda_emit*(1.+redshift)
 
-def lambda_to_velocity(lambda_obs, lambda_emit, redshift):
+def lambda_to_velocity(lambda_obs, lambda0, redshift):
     '''
         convert the observed lambda to peculiar velocity,
         ASSUME that the cosmological redshift is known
@@ -39,19 +39,19 @@ def lambda_to_velocity(lambda_obs, lambda_emit, redshift):
                                          which is a combination of peculiar+cosmological)
     '''
 
-    z_peculiar = lambda_obs/((1.+redshift)*lambda_emit) - 1.
+    z_peculiar = lambda_obs/((1.+redshift)*lambda0) - 1.
     v_peculiar = z_peculiar*c
 
     return v_peculiar
 
-def velocity_to_lambda(v_peculiar, lambda_emit, redshift):
+def velocity_to_lambda(v_peculiar, lambda0, redshift):
     '''
         find observed lambda, given that the peculiar velocity, and cosmological redshift is known
         redshift: cosmological redshift
     '''
 
     z_peculiar = v_peculiar/c
-    lambda_obs = (1.+z_peculiar) * (1.+redshift) * lambda_emit
+    lambda_obs = (1.+z_peculiar) * (1.+redshift) * lambda0
 
     return lambda_obs
 
@@ -195,3 +195,68 @@ class Galaxy():
         pt_top = [0., self.b]
         pt_bottom = [0., -self.b]
         return np.array([pt_left, pt_right, pt_top, pt_bottom])
+
+
+class Spec2D:
+    '''Slit Spectrum data class'''
+
+    def __init__(self, array, spaceGrid, lambdaGrid, array_var=None):
+        '''
+            Args:
+                array: 2D array, shape (ngrid_pos, ngrid_spec)
+                spaceGrid: 1D array
+                lambdaGrid: 1D array
+                array_var: 2D array, storing the variance of self.array
+                    e.g. The sky slit spectrum genertate by tfCube.skySpec2D()
+        '''
+        self.array = array
+        self.spaceGrid = spaceGrid
+        self.lambdaGrid = lambdaGrid
+
+        if array_var is not None:
+            self.array_var = array_var
+
+    @property
+    def ngrid_pos(self):
+        return len(self.spaceGrid)
+
+    @property
+    def ngrid_spec(self):
+        return len(self.lambdaGrid)
+
+    def cutout(self, xlim=None, lambdalim=None, thresholdSNR=0.):
+        '''return a Spec2D object with smaller array size in given space limit and lambda limit
+            Args:
+                xlim = [-2.5, 2.5]
+        '''
+
+        if xlim is not None:
+            id_x = np.where((self.spaceGrid >= xlim[0]) & (self.spaceGrid <= xlim[1]))[0]
+        else:
+            id_x = range(self.ngrid_pos)
+
+        if lambdalim is not None:
+            id_lambda = np.where((self.lambdaGrid >= lambdalim[0]) & (self.lambdaGrid <= lambdalim[1]))[0]
+        else:
+            id_lambda = range(self.ngrid_spec)
+        
+        if thresholdSNR > 0.:
+            id_x_highSNR = np.where(self.SNR_pos >= thresholdSNR)[0]
+            id_x = list(set(id_x).intersection(set(id_x_highSNR))) # take commond position IDs within xlim & highSNR
+            id_x.sort()
+
+        if self.array_var is not None:
+            return Spec2D(self.array[id_x, :][:, id_lambda], self.spaceGrid[id_x], self.lambdaGrid[id_lambda], self.array_var[id_x, :][:, id_lambda])
+        else:
+            return Spec2D(self.array[id_x, :][:, id_lambda], self.spaceGrid[id_x], self.lambdaGrid[id_lambda])
+
+    @property
+    def SNR_pos(self):
+        '''Compute the total SNR for each position stripe of the spec2D array'''
+
+        SNR = np.zeros(self.ngrid_pos)
+
+        for j in range(self.ngrid_pos):
+            SNR[j] = np.sqrt(np.sum(self.array[j]**2/self.array_var[j]))
+
+        return SNR
