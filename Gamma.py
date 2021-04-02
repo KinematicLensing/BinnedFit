@@ -18,7 +18,7 @@ from tfCube2 import Parameters
 
 class Gamma():
 
-    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'r_hl_image', 'theta_int', 'flux'], par_fix=None, vTFR_mean=None, thresholdSNR=0.):
+    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'r_hl_image', 'theta_int', 'flux'], par_fix=None, vTFR_mean=None, thresholdSNR=0., is_weightSNR=1.):
 
         self.sigma_TF_intr = 0.08
 
@@ -26,7 +26,7 @@ class Gamma():
             self.vTFR_mean = 200.
         else:
             self.vTFR_mean = vTFR_mean
-        
+                
         self.Pars = Parameters(par_in=data_info['par_fid'], line_species=data_info['line_species'])
 
         self.par_fid = data_info['par_fid']
@@ -42,7 +42,7 @@ class Gamma():
         #if 'flux' in active_par_key:
         #    active_par_key.remove('flux')
         
-        self.RotFit = RotationCurveFit(data_info, active_par_key=active_par_key, par_fix=par_fix, thresholdSNR=thresholdSNR)
+        self.RotFit = RotationCurveFit(data_info, active_par_key=active_par_key, par_fix=par_fix, thresholdSNR=thresholdSNR, is_weightSNR=is_weightSNR)
 
         self.active_par_key_img = self.ImgFit.active_par_key
         self.active_par_key = active_par_key

@@ -1,9 +1,9 @@
 import numpy as np
-from scipy.optimize import curve_fit
-import time
 import emcee
 from multiprocessing import Pool
 from binnedFit_utilities import velocity_to_lambda
+from spec2D import Spec2D
+from gaussFit import GaussFit
 import sys
 import pathlib
 
@@ -12,85 +12,9 @@ dir_KLens = dir_repo + '/KLens'
 sys.path.append(dir_KLens)
 from tfCube2 import Parameters
 
-
-class GaussFit_signle():
-    def __init__(self, spec2D, lambda0, thresholdSNR=None):
-
-        self.lambda0 = lambda0
-
-        if thresholdSNR is not None:
-            self.spec2D = spec2D.cutout(thresholdSNR=thresholdSNR)
-        else:
-            self.spec2D = spec2D
-
-    def get_peak_info(self):
-        '''
-            get peak spectra information for each of the spatial grid
-            for a given position stripe, find the peak flux (peak_flux), at which lambda grid (peak_id), corresponding to what lambda (peak_loc).
-        '''
-        peak_info = {}
-        peak_info['peak_id'] = np.argmax(self.spec2D.array, axis=1)
-        peak_info['peak_loc'] = self.spec2D.lambdaGrid[peak_info['peak_id']]
-        peak_info['peak_flux'] = np.amax(self.spec2D.array, axis=1)
-        return peak_info
-    
-    def gaussian_single(self, x, x0, amp, sigma):
-        return amp*np.exp(-(x-x0)**2 / (2*sigma**2)) / np.sqrt(2*np.pi*sigma**2)
-
-    def _fitGauss_per_bin(self, pos_id, fit_function):
-        '''
-            fit 1D gaussian for the spec2D data at each position bin (given pos_id: spec2D[pos_id])
-            use get_peak_info as an initial starting point before running optimizer
-        '''
-        peak_info = self.get_peak_info()
-
-        # initial guess on the velocity dispersion at fixed position (here the unit is in nm)
-        # init_sigma need to be in the same unit as self.lambdaGrid
-        init_sigma = 1.
-        
-        # for [x0,amp,sigma]
-        init_vals = [peak_info['peak_loc'][pos_id], peak_info['peak_flux'][pos_id], init_sigma]  
-
-        # curve_fit(fit_fun,x,f(x),p0=initial_par_values)
-        best_vals, covar = curve_fit(fit_function, self.spec2D.lambdaGrid, self.spec2D.array[pos_id], p0=init_vals)
-
-        return best_vals
-
-    def gaussFit_spec2D(self):
-        '''
-            loop over each position stripe to get fitted_amp, fitted_peakLambda, fitted_sigma
-            fitted_peakLambda unit: same as self.lambdaGrid
-        '''
-        ngrid_pos = self.spec2D.ngrid_pos
-        amp = np.zeros(ngrid_pos)
-        peakLambda = np.zeros(ngrid_pos)
-        sigma = np.zeros(ngrid_pos)
-
-        start_time = time.time()
-
-        for j in range(ngrid_pos):
-            peakLambda[j], amp[j], sigma[j] = self._fitGauss_per_bin(j, fit_function=self.gaussian_single)
-
-        end_time = time.time()
-        print("time cost in gaussFit_spec2D:", (end_time-start_time), "(secs)")
-
-        return peakLambda, amp, sigma
-
-    def model_spec2D(self, fitted_peakLambda, fitted_amp, fitted_sigma):
-        '''
-            generate model 2D spectrum based on best fitted parameters derived from fit_spec2D
-        '''
-        model_spec2D = np.zeros([self.spec2D.ngrid_pos, self.spec2D.ngrid_spec])
-
-        for j in range(self.spec2D.ngrid_pos):
-            model_spec2D[j] = self.gaussian_single(self.spec2D.lambdaGrid, fitted_peakLambda[j], fitted_amp[j], fitted_sigma[j])
-
-        return model_spec2D
-
-
 class RotationCurveFit():
 
-    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2', 'theta_int'], par_fix=None, vTFR_mean=None, thresholdSNR=0):
+    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2', 'theta_int'], par_fix=None, vTFR_mean=None, thresholdSNR=0, is_weightSNR=1.):
         '''
             e.g. 
             active_par_key = ['vscale', 'r_0', 'sini', 'v_0'] # 'redshift'
@@ -105,6 +29,8 @@ class RotationCurveFit():
             self.vTFR_mean = vTFR_mean
 
         self.thresholdSNR = thresholdSNR
+
+        self.is_weightSNR = is_weightSNR
 
         self.Pars = Parameters(par_in=data_info['par_fid'], line_species=data_info['line_species'])
 
@@ -132,10 +58,12 @@ class RotationCurveFit():
         
         spec_stats = []
         for j in range(self.Nspec):
-            GaussFit = GaussFit_signle(spec2D=self.spec[j], lambda0=self.lambda0, thresholdSNR=self.thresholdSNR)
-            self.spec[j] = GaussFit.spec2D
+            print(self.spec[j].array.shape)
+            GF = GaussFit(spec2D=self.spec[j], thresholdSNR=self.thresholdSNR)
+            self.spec[j] = GF.spec2D
+            print(self.spec[j].array.shape)
             stats = {}
-            stats['peakLambda'], stats['amp'], stats['sigma'] = GaussFit.gaussFit_spec2D()
+            stats['peakLambda'], stats['amp'], stats['sigma'] = GF.fit_spec2D()
             spec_stats.append(stats)
         
         return spec_stats
@@ -191,7 +119,12 @@ class RotationCurveFit():
             #print(model)
 
             diff = self.spec_stats[j]['peakLambda'] - model
-            chi2 = np.sum((diff/self.spec_stats[j]['sigma'])**2)
+            if self.is_weightSNR:
+                # normalizing the weighting factor such that weight_SNR.mean() = 1.0
+                weight_SNR = self.spec[j].SNR_pos / self.spec[j].SNR_pos.mean() 
+                chi2 = np.sum(weight_SNR*(diff/self.spec_stats[j]['sigma'])**2)
+            else:
+                chi2 = np.sum((diff/self.spec_stats[j]['sigma'])**2)
             chi2_tot += chi2
 
         return chi2_tot
