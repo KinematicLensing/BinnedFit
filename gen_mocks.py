@@ -46,9 +46,7 @@ def gen_mock_tfCube(pars=None, line_species='Halpha', slits='both', noise_mode=0
     # change dataInfo['spec'] = [2Darr_1, 2Darr_2] from a list of np.array to be a list of Spec2D objects
     # making Spec2D objects
     for j in range(len(dataInfo['spec'])):
-        dataInfo['spec'][j] = Spec2D(array=dataInfo['spec'][j], spaceGrid=dataInfo['spaceGrid'], lambdaGrid=dataInfo['lambdaGrid'], array_var=dataInfo['spec_variance'][j], auto_cut=False)
-    
-    dataInfo['lambda0'] = pars['linelist']['lambda'][pars['linelist']['species']==line_species][0]
+        dataInfo['spec'][j] = Spec2D(array=dataInfo['spec'][j], array_var=dataInfo['spec_variance'][j],spaceGrid=dataInfo['spaceGrid'], lambdaGrid=dataInfo['lambdaGrid'], line_species=line_species, z=dataInfo['par_fid']['redshift'], auto_cut=False)
     
     return dataInfo
 

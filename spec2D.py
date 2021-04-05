@@ -1,33 +1,50 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from gaussFit import GaussFit
+from gaussFit import GaussFit, GaussFitDouble
 from binnedFit_utilities import lambda_to_velocity
 
 class Spec2D:
     '''Slit Spectrum data class'''
+    lineLambda0 = {'Halpha': 656.461, 'OII': [372.7092, 372.9875], 'OIII': [496.0295,500.8240]}
 
-    def __init__(self, array, spaceGrid, lambdaGrid, array_var=None, auto_cut=False, is_singlet=True):
+    def __init__(self, array, array_var, spaceGrid, lambdaGrid, line_species, z, auto_cut=False):
         '''
             Args:
                 array: 2D array, shape (ngrid_pos, ngrid_spec)
-                spaceGrid: 1D array
-                lambdaGrid: 1D array
                 array_var: 2D array, storing the variance of self.array
                     e.g. The sky slit spectrum genertate by tfCube.skySpec2D()
+                spaceGrid: 1D array
+                lambdaGrid: 1D array
+                
+                line_species: str, 'Halpha', 'OII', 'OIII'
+                z : redshift of the spectrum
         '''
         self.array = array
         self.spaceGrid = spaceGrid
         self.lambdaGrid = lambdaGrid
+        self.line_species = line_species
+        self.z = z
 
-        if array_var is not None:
-            self.array_var = array_var
+        self.array_var = array_var
         
+        self.lambda0 = np.mean(Spec2D.lineLambda0[self.line_species])
+
+        self.center = (0., (1.+self.z)*self.lambda0)
+
         if auto_cut:
             self.auto_cutout()
 
-        self.is_singlet = is_singlet
-
         self._SNR = None
+
+        if self.line_species in ['OII', 'OIII']:
+            self._is_singlet = False
+        else:
+            self._is_singlet = True
+
+        if self._is_singlet:
+            self.GF = GaussFit(spec2D=self)
+        else:
+            self.GF = GaussFitDouble(spec2D=self)
     
     @property
     def pixScale(self):
@@ -93,10 +110,8 @@ class Spec2D:
             id_x = list(set(id_x).intersection(set(id_x_highSNR)))
             id_x.sort()
         
-        if self.array_var is not None:
-            return Spec2D(self.array[id_x, :][:, id_lambda], self.spaceGrid[id_x], self.lambdaGrid[id_lambda], self.array_var[id_x, :][:, id_lambda])
-        else:
-            return Spec2D(self.array[id_x, :][:, id_lambda], self.spaceGrid[id_x], self.lambdaGrid[id_lambda])
+        return Spec2D(self.array[id_x, :][:, id_lambda], self.array_var[id_x, :][:, id_lambda], self.spaceGrid[id_x], self.lambdaGrid[id_lambda], self.line_species, self.z)
+
 
     @property
     def SNR_pos(self):
@@ -104,10 +119,9 @@ class Spec2D:
 
         if self._SNR is None:
             self._SNR = np.zeros(self.ngrid_pos)
-            
             for j in range(self.ngrid_pos):
                 self._SNR[j] = np.sqrt(np.sum(self.array[j]**2/self.array_var[j]))
-
+    
         return self._SNR
     
     def _get_mesh(self, mode='corner'):
@@ -125,7 +139,7 @@ class Spec2D:
             Xmesh, Lmesh = np.meshgrid(self.spaceGrid, self.lambdaGrid)
         return Xmesh, Lmesh
 
-    def display(self, xlim=None, ylim=None, filename=None, title='slit spectrum', center=None, 
+    def display(self, xlim=None, ylim=None, filename=None, title='slit spectrum', mark_cen=True, 
                 mark_peak=False, mark_fit=False, model=None):
         '''display the spec2D array
             Args:
@@ -145,9 +159,9 @@ class Spec2D:
             mplot = ax.contour(Xmesh, Lmesh, model.T, levels=splot.levels, colors='yellow')
             ax.clabel(mplot, inline=1, fontsize=10)
 
-        if center is not None:
-            ax.axvline(x=center[0], ls='--', color='lightgray', alpha=0.7)
-            ax.axhline(y=center[1], ls='--', color='lightgray', alpha=0.7)
+        if mark_cen:
+            ax.axvline(x=self.center[0], ls='--', color='lightgray', alpha=0.7)
+            ax.axhline(y=self.center[1], ls='--', color='lightgray', alpha=0.7)
 
         ax.set_xlabel('x [arcsec]', fontsize=16)
         ax.set_ylabel('$\lambda$ [nm]', fontsize=16)
@@ -170,8 +184,8 @@ class Spec2D:
         
         ax2 = ax.twinx()
         ax2.yaxis.set_label_position("right")
-        _y_lim_vel = lambda_to_velocity(ax.get_ylim(), lambda0=656.461, z=0.4)
-        ax2.set_ylim(_y_lim_vel)
+        _v_lim = lambda_to_velocity(ax.get_ylim(), lambda0=self.lambda0, z=self.z)
+        ax2.set_ylim(_v_lim)
         ax2.tick_params(labelsize=14)
         ax2.set_ylabel('v [km/s]', fontsize=16)
         
@@ -179,10 +193,20 @@ class Spec2D:
             ax.scatter(self.spaceGrid, self.peak_lambda, color='orange', s=3, alpha=0.6)
         
         if mark_fit:
-            GF = GaussFit(spec2D=self)
-            peakLambda, amp, sigma = GF.fit_spec2D(function=GaussFit.gaussian)
-            ax.errorbar(GF.spec2D.spaceGrid[1::3], peakLambda[1::3], sigma[1::3], color='orange',
+            cenLambda, amp, sigma = self.GF.fit_spec2D()
+
+            if self._is_singlet:
+                ax.errorbar(self.spaceGrid[1::3], cenLambda[1::3], sigma[1::3], color='dimgray',
                         marker='o', markersize=2, ls='none', label='gaussFit summary')
+            else:
+                peakLambda_lo = self.GF.cal_peak_lambda(cenLambda, mode='lo')
+                peakLambda_up = self.GF.cal_peak_lambda(cenLambda, mode='up')
+                ax.errorbar(self.spaceGrid[1::3], peakLambda_lo[1::3], sigma[1::3], color='dimgray',
+                            marker='o', markersize=2, ls='none', label='gaussFit summary')
+                ax.errorbar(self.spaceGrid[2::3], peakLambda_up[2::3], sigma[2::3], color='dimgray',
+                            marker='o', markersize=2, ls='none')
+                ax.plot(self.spaceGrid, cenLambda, ls='-.', color='lightgray')
+
             #ax.legend(loc="best", prop={'size': 12})
 
         if filename is not None:
@@ -215,9 +239,8 @@ if __name__ == '__main__':
     
     # ========= create Spec2D object ========= #
 
-    spec2D = Spec2D(array=spec_array, spaceGrid=spaceGrid, lambdaGrid=lambdaGrid,
-                    array_var=spec_var, auto_cut=True)
+    spec2D = Spec2D(array=spec_array, spaceGrid=spaceGrid, lambdaGrid=lambdaGrid, line_species=line_species, z=dataInfo['par_fid']['redshift'], array_var=spec_var, auto_cut=True)
 
-    fig, ax=spec2D.display(mark_peak=True, xlim=[-2.5, 2.5], center=(0, dataInfo['par_fid']['lambda_cen']))
+    fig, ax=spec2D.display(mark_peak=True, xlim=[-2.5, 2.5])
     ax.axvline(x=-1.5)
     fig.show()
