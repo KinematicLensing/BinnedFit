@@ -1,18 +1,23 @@
 import numpy as np
 import time
 import emcee
-from multiprocessing import Pool
 import sys
 import pathlib
 
 from imageFit import ImageFit
 from rotCurveFit import RotFitSingle, RotFitDouble
-#from binnedFit_utilities import *
+from binnedFit_utilities import load_pickle, save_pickle
 
 dir_repo = str(pathlib.Path(__file__).parent.absolute())+'/..'
 dir_KLens = dir_repo + '/KLens'
 sys.path.append(dir_KLens)
 from tfCube2 import Parameters
+
+import os
+os.environ["OMP_NUM_THREADS"] = "1"   # suggested to set this for the parallel of emcee
+from multiprocessing import Pool
+from multiprocessing import cpu_count
+from schwimmbad import MPIPool
 
 class GammaInference():
 
@@ -52,6 +57,8 @@ class GammaInference():
         self.par_lim = self.Pars.set_par_lim()  # defined in tfCube2.Parameters.set_par_lim()
         self.par_std = self.Pars.set_par_std()
 
+        self._parpare_storage_info()
+
     def cal_loglike(self, active_par):
         
         pars = self.Pars.gen_par_dict(active_par=active_par, active_par_key=self.active_par_key, par_ref=self.par_base)
@@ -78,8 +85,25 @@ class GammaInference():
         loglike = logL_img+logL_spec+logPrior_vcirc
         
         return loglike
+
+    def _parpare_storage_info(self):
+
+        self.chainInfo = {}
+        self.chainInfo['par_fid'] = self.par_fid.copy()
+        self.chainInfo['par_fix'] = self.par_fix
+        self.chainInfo['par_name'] = self.Pars.set_par_name()
+        self.chainInfo['par_key'] = self.active_par_key
     
-    def run_MCMC(self, Nwalker, Nsteps):
+    def save_chain(self, sampler, outfile_MCMC):
+
+        self.chainInfo['acceptance_fraction'] = np.mean(sampler.acceptance_fraction)  # good range: 0.2~0.5
+        self.chainInfo['lnprobability'] = sampler.lnprobability
+        self.chainInfo['chain'] = sampler.chain
+        save_pickle(filename=outfile_MCMC, info=self.chainInfo)
+        
+        return self.chainInfo
+    
+    def run_MCMC(self, Nwalker, Nsteps, outfile_MCMC=None, save_step_size=2):
 
         Ndim = len(self.active_par_key)
 
@@ -87,27 +111,64 @@ class GammaInference():
         std = [self.par_std[item] for item in self.active_par_key]
 
         p0_walkers = emcee.utils.sample_ball(starting_point, std, size=Nwalker)
+        
+        with Pool() as pool:
+            sampler = emcee.EnsembleSampler(Nwalker, Ndim, self.cal_loglike, a=2.0, pool=pool)
 
-        sampler = emcee.EnsembleSampler(Nwalker, Ndim, self.cal_loglike, a=2.0)
+            step_size = save_step_size
+            steps_taken = 0
 
-        posInfo = sampler.run_mcmc(p0_walkers, 1)
-        p0_walkers = posInfo.coords
-        sampler.reset()
+            ##### start long sampling
+            Tstart = time.time()
 
-        Tstart = time.time()
-        posInfo = sampler.run_mcmc(p0_walkers, Nsteps, progress=True)
-        Time_MCMC = (time.time()-Tstart)/60.
-        print ("Total MCMC time (mins):", Time_MCMC)
+            while steps_taken < Nsteps:
+                posInfo = sampler.run_mcmc(p0_walkers, step_size, progress=True)
+                p0_walkers = posInfo.coords
+                steps_taken+=step_size
+                print("steps_taken", steps_taken)
 
-        chain_info = {}
-        chain_info['acceptance_fraction'] = np.mean(sampler.acceptance_fraction)  # good range: 0.2~0.5
-        chain_info['lnprobability'] = sampler.lnprobability
-        chain_info['par_fid'] = self.par_fid
-        chain_info['chain'] = sampler.chain
-        chain_info['par_key'] = self.active_par_key
-        chain_info['par_fix'] = self.par_fix
+                self.chainInfo = self.save_chain(sampler=sampler, outfile_MCMC=outfile_MCMC)
 
-        return chain_info
+            Time_MCMC = (time.time()-Tstart)/60.
+            print("Total MCMC time (mins):", Time_MCMC)
+
+        return self.chainInfo
+    
+    def run_MCMC_mpi(self, Nwalker, Nsteps, outfile_MCMC=None, save_step_size=2):
+
+        Ndim = len(self.active_par_key)
+
+        starting_point = [self.par_fid[item] for item in self.active_par_key]
+        std = [self.par_std[item] for item in self.active_par_key]
+
+        p0_walkers = emcee.utils.sample_ball(starting_point, std, size=Nwalker)
+        
+        with MPIPool() as pool:
+            if not pool.is_master():
+                pool.wait()
+                sys.exit(0)
+                
+            sampler = emcee.EnsembleSampler(Nwalker, Ndim, self.cal_loglike, a=2.0, pool=pool)
+
+            step_size = save_step_size
+            steps_taken = 0
+
+            ##### start long sampling
+            Tstart = time.time()
+
+            while steps_taken < Nsteps:
+                posInfo = sampler.run_mcmc(p0_walkers, step_size, progress=True)
+                p0_walkers = posInfo.coords
+                steps_taken+=step_size
+                print("steps_taken", steps_taken)
+
+                self.chainInfo = self.save_chain(sampler=sampler, outfile_MCMC=outfile_MCMC)
+
+            Time_MCMC = (time.time()-Tstart)/60.
+            print("Total MCMC time (mins):", Time_MCMC)
+
+        return self.chainInfo
+        
 
 if __name__ == '__main__':
     dir_binnedFit = str(pathlib.Path(__file__).parent.absolute())
