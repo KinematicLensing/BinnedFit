@@ -141,10 +141,7 @@ class Spec2D:
 
     def display(self, xlim=None, ylim=None, filename=None, title='slit spectrum', mark_cen=True, 
                 mark_peak=False, mark_fit=False, model=None):
-        '''display the spec2D array
-            Args:
-                center: center position of the spectrum in (x, lambda)
-        '''
+        '''display the spec2D array'''
 
         fig, ax = plt.subplots(1, 1, figsize=(6.5, 4.5))
         plt.rc('font', size=16)

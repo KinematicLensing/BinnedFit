@@ -2,23 +2,21 @@ import numpy as np
 import time
 import emcee
 from multiprocessing import Pool
-from scipy.stats import gaussian_kde
-from scipy.interpolate import interp1d
 import sys
 import pathlib
 
-from binnedFit_utilities import *
-from ImageFit import ImageFit
-from RotationCurveFit import RotationCurveFit
+from imageFit import ImageFit
+from rotCurveFit import RotFitSingle, RotFitDouble
+#from binnedFit_utilities import *
 
 dir_repo = str(pathlib.Path(__file__).parent.absolute())+'/..'
 dir_KLens = dir_repo + '/KLens'
 sys.path.append(dir_KLens)
 from tfCube2 import Parameters
 
-class Gamma():
+class GammaInference():
 
-    def __init__(self, data_info, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'r_hl_image', 'theta_int', 'flux'], par_fix=None, vTFR_mean=None, thresholdSNR=0., is_weightSNR=1.):
+    def __init__(self, dataInfo, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'r_hl_image', 'theta_int', 'flux'], par_fix=None, vTFR_mean=None):
 
         self.sigma_TF_intr = 0.08
 
@@ -27,9 +25,11 @@ class Gamma():
         else:
             self.vTFR_mean = vTFR_mean
                 
-        self.Pars = Parameters(par_in=data_info['par_fid'], line_species=data_info['line_species'])
+        self.Pars = Parameters(par_in=dataInfo['par_fid'], line_species=dataInfo['line_species'])
 
-        self.par_fid = data_info['par_fid']
+        self.active_par_key = active_par_key
+
+        self.par_fid = dataInfo['par_fid']
         self.par_fix = par_fix
 
         if self.par_fix is not None:
@@ -37,39 +37,46 @@ class Gamma():
         else:
             self.par_base = self.par_fid.copy()
         
-        self.ImgFit = ImageFit(data_info, active_par_key=['sini', 'r_hl_image', 'theta_int', 'g1', 'g2', 'flux'], par_fix=par_fix)
-
-        #if 'flux' in active_par_key:
-        #    active_par_key.remove('flux')
+        self._is_singlet = dataInfo['spec'][0]._is_singlet
+        self.Nspec = len(dataInfo['spec'])
         
-        self.RotFit = RotationCurveFit(data_info, active_par_key=active_par_key, par_fix=par_fix, thresholdSNR=thresholdSNR, is_weightSNR=is_weightSNR)
+        self.ImgFit = ImageFit(dataInfo['image'], par_init=self.par_base)
 
-        self.active_par_key_img = self.ImgFit.active_par_key
-        self.active_par_key = active_par_key
+        self.RFs = []
+        for j in range(self.Nspec):
+            if self._is_singlet:
+                self.RFs.append(RotFitSingle(dataInfo['spec'][j]))
+            else:
+                self.RFs.append(RotFitDouble(dataInfo['spec'][j]))
 
         self.par_lim = self.Pars.set_par_lim()  # defined in tfCube2.Parameters.set_par_lim()
         self.par_std = self.Pars.set_par_std()
 
     def cal_loglike(self, active_par):
-        '''
-        '''
-
-        par = self.Pars.gen_par_dict(active_par=active_par, active_par_key=self.active_par_key, par_ref=self.par_base)
-
+        
+        pars = self.Pars.gen_par_dict(active_par=active_par, active_par_key=self.active_par_key, par_ref=self.par_base)
+        
         for item in self.active_par_key:
-            if (par[item] < self.par_lim[item][0] or par[item] > self.par_lim[item][1]):
+            if (pars[item] < self.par_lim[item][0] or pars[item] > self.par_lim[item][1]):
                 return -np.inf
         
-        logPrior_vcirc = self.Pars.logPrior_vcirc(vcirc=par['vcirc'], sigma_TF_intr=self.sigma_TF_intr, vTFR_mean=self.vTFR_mean)
+        logPrior_vcirc = self.Pars.logPrior_vcirc(vcirc=pars['vcirc'], sigma_TF_intr=self.sigma_TF_intr, vTFR_mean=self.vTFR_mean)
 
-        active_par_ImgFit = [par[item_key] for item_key in self.active_par_key_img]
-        logL_img = self.ImgFit.cal_loglike(active_par=active_par_ImgFit)
-        logL_spec = self.RotFit.cal_loglike(active_par=active_par)
+        modelImg = self.ImgFit.forward_model(pars)
+        logL_img = -0.5*self.ImgFit.cal_chi2(modelImg)
+
+        logL_spec = 0.
+        for j in range(self.Nspec):
+            pars['slitAngle'] = pars['slitAngles'][j]
+            modelSpec_j = self.RFs[j].forward_model(pars)
+            logL_spec += -0.5*self.RFs[j].cal_chi2(modelSpec_j)
+        
+        #print('logPrior_vcirc:', logPrior_vcirc)
         #print('logL_img:', logL_img)
         #print('logL_spec:', logL_spec)
 
         loglike = logL_img+logL_spec+logPrior_vcirc
-
+        
         return loglike
     
     def run_MCMC(self, Nwalker, Nsteps):
@@ -79,12 +86,11 @@ class Gamma():
         starting_point = [self.par_fid[item] for item in self.active_par_key]
         std = [self.par_std[item] for item in self.active_par_key]
 
-        
         p0_walkers = emcee.utils.sample_ball(starting_point, std, size=Nwalker)
 
         sampler = emcee.EnsembleSampler(Nwalker, Ndim, self.cal_loglike, a=2.0)
 
-        posInfo = sampler.run_mcmc(p0_walkers, 5)
+        posInfo = sampler.run_mcmc(p0_walkers, 1)
         p0_walkers = posInfo.coords
         sampler.reset()
 
@@ -92,7 +98,6 @@ class Gamma():
         posInfo = sampler.run_mcmc(p0_walkers, Nsteps, progress=True)
         Time_MCMC = (time.time()-Tstart)/60.
         print ("Total MCMC time (mins):", Time_MCMC)
-
 
         chain_info = {}
         chain_info['acceptance_fraction'] = np.mean(sampler.acceptance_fraction)  # good range: 0.2~0.5
@@ -103,6 +108,39 @@ class Gamma():
         chain_info['par_fix'] = self.par_fix
 
         return chain_info
+
+if __name__ == '__main__':
+    dir_binnedFit = str(pathlib.Path(__file__).parent.absolute())
+    sys.path.append(dir_binnedFit+'/tests')
+    from get_pars import get_pars0
+
+    from gen_mocks import gen_mock_tfCube
+
+    pars, _ = get_pars0()
+    dataInfo = gen_mock_tfCube(pars, 'Halpha', slits='both', noise_mode=0)
+
+    # ----------------------
+    GI = GammaInference(dataInfo, active_par_key=[
+                        'vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'r_hl_image', 'theta_int', 'flux'], par_fix=None, vTFR_mean=200.)
+    
+    active_par_fid = [GI.par_fid[key] for key in GI.active_par_key]
+    loglike_at_fid = GI.cal_loglike(active_par_fid)
+
+    # -- check fit status --
+    pars = GI.Pars.gen_par_dict(
+        active_par=active_par_fid, active_par_key=GI.active_par_key, par_ref=GI.par_base)
+    dataInfo['image'].display(xlim=[-2.5, 2.5], model=GI.ImgFit.forward_model(pars))
+
+    j = 0
+    pars['slitAngle'] = pars['slitAngles'][j]
+    dataInfo['spec'][j].display(xlim=[-2.5, 2.5], model=GI.RFs[j].forward_model(pars))
+
+    j = 1
+    pars['slitAngle'] = pars['slitAngles'][j]
+    dataInfo['spec'][j].display(xlim=[-2.5, 2.5], model=GI.RFs[j].forward_model(pars))
+
+
+
 
 
 

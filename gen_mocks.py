@@ -8,11 +8,14 @@ sys.path.append(dir_KLens)
 dir_binnedFit = dir_repo + '/BinnedFit'
 sys.path.append(dir_binnedFit)
 
+dir_TNGcube = dir_repo + '/TNGcube'
+sys.path.append(dir_TNGcube)
+
 from binnedFit_utilities import cal_e_int, cal_theta_obs
 from spec2D import Spec2D
+from TNGcube import Image
 from KLtool import find_flux_norm
 from tfCube2 import TFCube, Parameters
-
 
 def gen_mock_tfCube(pars=None, line_species='Halpha', slits='both', noise_mode=0):
 
@@ -48,6 +51,9 @@ def gen_mock_tfCube(pars=None, line_species='Halpha', slits='both', noise_mode=0
     for j in range(len(dataInfo['spec'])):
         dataInfo['spec'][j] = Spec2D(array=dataInfo['spec'][j], array_var=dataInfo['spec_variance'][j],spaceGrid=dataInfo['spaceGrid'], lambdaGrid=dataInfo['lambdaGrid'], line_species=line_species, z=dataInfo['par_fid']['redshift'], auto_cut=False)
     
+    # make Image object
+    dataInfo['image'] = Image(dataInfo['image'], dataInfo['spaceGrid'], array_var=dataInfo['image_variance'])
+    
     return dataInfo
 
 
@@ -58,3 +64,4 @@ if __name__ == '__main__':
     pars, line_species = get_pars0()
     dataInfo = gen_mock_tfCube(pars, line_species, slits='major', noise_mode=0)
 
+    #dataInfo['image'].display(xlim=[-2,2])

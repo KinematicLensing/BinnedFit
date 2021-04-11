@@ -53,12 +53,6 @@ class GaussFit():
             print(f'RuntimeError for pos_id: {pos_id}. Set best-fit gaussian amp. = 0')
             best_vals = (self.init_cenLambda[pos_id], 0., 10.)
             
-            #init_pt = [self.init_cenLambda[pos_id], 1., 100.]
-            #try:
-            #    best_vals, covar = curve_fit(function, self.spec2D.lambdaGrid, self.spec2D.array[pos_id], p0=init_pt, maxfev=1000)
-            #except RuntimeError:
-            #    print(f'2nd RuntimeError for pos_id: {pos_id}. Simply set best-fit gaussian amp=0.')
-                
         return best_vals
 
     def fit_spec2D(self):
