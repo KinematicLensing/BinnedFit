@@ -1,6 +1,7 @@
 build
 *.pdf
 tempCodeBit.py
+*.pkl
 
 *.o
 *.out
