@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 from gaussFit import GaussFit, GaussFitDouble
-from binnedFit_utilities import lambda_to_velocity
+from binnedFit_utilities import lambda_to_velocity, velocity_to_lambda
 
 class Spec2D:
     '''Slit Spectrum data class'''
@@ -139,7 +139,7 @@ class Spec2D:
             Xmesh, Lmesh = np.meshgrid(self.spaceGrid, self.lambdaGrid)
         return Xmesh, Lmesh
 
-    def display(self, xlim=None, ylim=None, filename=None, title='slit spectrum', mark_cen=True, 
+    def display(self, xlim=None, ylim=None, vlim=None, filename=None, title='slit spectrum', mark_cen=True, 
                 mark_peak=False, mark_fit=False, model=None):
         '''display the spec2D array'''
 
@@ -175,6 +175,9 @@ class Spec2D:
             ax.set_xlim((self.spaceGrid.min(), self.spaceGrid.max()))
 
         if ylim is not None:
+            ax.set_ylim((ylim[0], ylim[1]))
+        elif vlim is not None:
+            ylim = velocity_to_lambda(v=vlim, lambda0=self.lambda0, z=self.z)
             ax.set_ylim((ylim[0], ylim[1]))
         else:
             ax.set_ylim((self.lambdaGrid.min(), self.lambdaGrid.max()))

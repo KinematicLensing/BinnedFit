@@ -19,7 +19,7 @@ class ImageFit():
         self.image = image
 
         if par_init is None:
-            self.par_init = Parameters()
+            self.par_init = Parameters().fid
         else:
             self.par_init = par_init
 
@@ -47,9 +47,82 @@ class ImageFit():
 
         return image.array
     
+    def simple_model(self, e, half_light_radius, theta_int, flux, g1=0., g2=0.):
+        '''Simple image model, only involves key parameters to describe an image
+            This function is used to find the major axis direction of image only data 
+        '''
+        disk = galsim.Sersic(n=1, half_light_radius=half_light_radius, flux=flux, trunc=4*half_light_radius)
+        disk = disk.shear(g1=e/2., g2=0.0)
+        disk = disk.rotate(theta_int*galsim.radians)
+        disk = disk.shear(g1=g1, g2=g2)
+        galObj = galsim.Convolution([disk, self.psf])
+        _image = galsim.Image(self.image.ngrid, self.image.ngrid, scale=self.image.pixScale)
+        newImage = galObj.drawImage(image=_image)
+        return newImage.array
+    
     def cal_chi2(self, model):
         return np.sum((self.image.array-model)**2/self.image.array_var)
+    
+
+    def _init_MCMC(self, active_par_key=['e_obs', 'r_hl_image', 'theta_int', 'flux'], par_fix={'g1':0., 'g2':0.}):
+        self.active_par_key = active_par_key
+        self.par_fix = par_fix
+
+        self.Pars = Parameters(par_in=self.par_init, line_species='Halpha')
         
+        if par_fix is not None:
+            self.par_base = self.Pars.gen_par_dict(active_par=list(self.par_fix.values()), active_par_key=list(self.par_fix.keys()), par_ref=self.par_init)
+        else:
+            self.par_base = self.par_init
+        
+        self.par_lim = self.Pars.set_par_lim()
+        self.par_std = self.Pars.set_par_std()
+
+    def cal_loglike(self, active_par):
+
+        pars = self.Pars.gen_par_dict(active_par=active_par, active_par_key=self.active_par_key, par_ref=self.par_base)
+
+        for item in self.active_par_key:
+            if (pars[item] < self.par_lim[item][0] or pars[item] > self.par_lim[item][1]):
+                return -np.inf
+        
+        modelImg = self.simple_model(e=pars['e_obs'], half_light_radius=pars['r_hl_image'], theta_int=pars['theta_int'], flux=pars['flux'], g1=pars['g1'], g2=pars['g2'])
+
+        logL_img = -0.5*self.cal_chi2(model=modelImg)
+
+        return logL_img
+
+    def run_MCMC(self, Nwalker, Nsteps, active_par_key=['e_obs', 'r_hl_image', 'theta_int', 'flux'], par_fix={'g1': 0., 'g2': 0.}):
+
+        self._init_MCMC(active_par_key=active_par_key, par_fix=par_fix)
+        Ndim = len(self.active_par_key)
+
+        starting_point = [self.par_init[item] for item in self.active_par_key]
+        std = [self.par_std[item] for item in self.active_par_key]
+        p0_walkers = emcee.utils.sample_ball(starting_point, std, size=Nwalker)
+
+        sampler = emcee.EnsembleSampler(Nwalker, Ndim, self.cal_loglike, a=5.0)
+        posInfo = sampler.run_mcmc(p0_walkers, 2)
+        p0_walkers = posInfo.coords
+        sampler.reset()
+
+        Tstart = time.time()
+        posInfo = sampler.run_mcmc(p0_walkers, Nsteps, progress=True)
+        Time_MCMC = (time.time()-Tstart)/60.
+        print("Total MCMC time (mins):", Time_MCMC)
+
+        chainInfo = {}
+        chainInfo['acceptance_fraction'] = np.mean(sampler.acceptance_fraction)  # good range: 0.2~0.5
+        chainInfo['lnprobability'] = sampler.lnprobability
+        chainInfo['chain'] = sampler.chain
+        chainInfo['par_key'] = self.active_par_key
+        chainInfo['par_fid'] = self.par_init
+        chainInfo['par_fix'] = self.par_fix
+
+        return chainInfo
+
+
+
 if __name__ == '__main__':
     dir_binnedFit = str(pathlib.Path(__file__).parent.absolute())
     sys.path.append(dir_binnedFit+'/tests')

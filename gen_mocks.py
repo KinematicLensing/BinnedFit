@@ -53,6 +53,8 @@ def gen_mock_tfCube(pars=None, line_species='Halpha', slits='both', noise_mode=0
     
     # make Image object
     dataInfo['image'] = Image(dataInfo['image'], dataInfo['spaceGrid'], array_var=dataInfo['image_variance'])
+
+    dataInfo['eint_thy'] = eint_thy
     
     return dataInfo
 

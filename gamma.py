@@ -59,6 +59,22 @@ class GammaInference():
 
         self._parpare_storage_info()
 
+    def _cal_loglike_image(self, pars):
+        modelImg = self.ImgFit.forward_model(pars)
+        logL_img = -0.5*self.ImgFit.cal_chi2(modelImg)
+        return logL_img, modelImg
+    
+    def _cal_bestfit_specStats(self, pars, IDspec):
+        pars['slitAngle'] = pars['slitAngles'][IDspec]
+        cenLambda, amp, sigma = self.RFs[IDspec].fit_spec2D(pars)
+        return cenLambda, amp, sigma
+    
+    def _cal_loglike_spec(self, pars, IDspec):
+        pars['slitAngle'] = pars['slitAngles'][IDspec]
+        modelSpec_i = self.RFs[IDspec].forward_model(pars)
+        logL_spec_i = -0.5*self.RFs[IDspec].cal_chi2(modelSpec_i)
+        return logL_spec_i, modelSpec_i
+
     def cal_loglike(self, active_par):
         
         pars = self.Pars.gen_par_dict(active_par=active_par, active_par_key=self.active_par_key, par_ref=self.par_base)
@@ -67,21 +83,13 @@ class GammaInference():
             if (pars[item] < self.par_lim[item][0] or pars[item] > self.par_lim[item][1]):
                 return -np.inf
         
+        logL_img, _ = self._cal_loglike_image(pars)
+        
         logPrior_vcirc = self.Pars.logPrior_vcirc(vcirc=pars['vcirc'], sigma_TF_intr=self.sigma_TF_intr, vTFR_mean=self.vTFR_mean)
-
-        modelImg = self.ImgFit.forward_model(pars)
-        logL_img = -0.5*self.ImgFit.cal_chi2(modelImg)
-
         logL_spec = 0.
         for j in range(self.Nspec):
-            pars['slitAngle'] = pars['slitAngles'][j]
-            modelSpec_j = self.RFs[j].forward_model(pars)
-            logL_spec += -0.5*self.RFs[j].cal_chi2(modelSpec_j)
+            logL_spec += self._cal_loglike_spec(pars, j)[0]
         
-        #print('logPrior_vcirc:', logPrior_vcirc)
-        #print('logL_img:', logL_img)
-        #print('logL_spec:', logL_spec)
-
         loglike = logL_img+logL_spec+logPrior_vcirc
         
         return loglike
