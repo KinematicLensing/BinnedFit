@@ -20,6 +20,21 @@ from multiprocessing import cpu_count
 from schwimmbad import MPIPool
 
 class GammaInference():
+    '''The main binnedFit pipeline that performs parameter inferences given data.
+        Args:
+            dataInfo: a dictionary that stores the data information.
+
+            active_par_key: a list of parameters to be vary during the MCMC sampling process.
+
+                e.g. active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'r_hl_image', 'theta_int', 'flux']
+
+            par_fix: dict 
+                To force some parameters to be fixed to certain values during the MCMC sampling.
+                e.g par_fix={'v_0': 0., 'theta_int': 0.}
+            
+            vTFR_mean: double
+                Expected rotational velocity for the input galaxy from tully-fisher relation.
+    '''
 
     def __init__(self, dataInfo, active_par_key=['vcirc', 'sini', 'vscale', 'r_0', 'v_0', 'g1', 'g2',  'r_hl_image', 'theta_int', 'flux'], par_fix=None, vTFR_mean=None):
 
