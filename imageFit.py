@@ -32,11 +32,17 @@ class ImageFit():
 
     def forward_model(self, pars):
 
-        disk = galsim.Sersic(n=1, half_light_radius=pars['r_hl_image'], flux=pars['flux'], trunc=4*pars['r_hl_image'])
+        inclination = np.arcsin(pars['sini'])
+        disk = galsim.inclined.InclinedSersic(n=1, inclination=inclination*galsim.radians,
+                                              half_light_radius=pars['r_hl_image'], scale_h_over_r=pars['aspect'], flux=pars['flux'],
+                                              trunc=4*pars['r_hl_image'])
 
-        e = cal_e_int(sini=pars['sini'], q_z=pars['aspect'])
-        g1_int = e/2.
-        disk = disk.shear(g1=g1_int, g2=0.0)
+        #disk = galsim.Sersic(n=1, half_light_radius=pars['r_hl_image'], flux=pars['flux'], trunc=4*pars['r_hl_image'])
+
+        #e = cal_e_int(sini=pars['sini'], q_z=pars['aspect'])
+        #g1_int = e/2.
+        #disk = disk.shear(g1=g1_int, g2=0.0)
+
         disk = disk.rotate(pars['theta_int']*galsim.radians)
         disk = disk.shear(g1=pars['g1'], g2=pars['g2'])
 
@@ -47,24 +53,24 @@ class ImageFit():
 
         return image.array
     
-    def simple_model(self, e, half_light_radius, theta_int, flux, g1=0., g2=0.):
-        '''Simple image model, only involves key parameters to describe an image
-            This function is used to find the major axis direction of image only data 
-        '''
-        disk = galsim.Sersic(n=1, half_light_radius=half_light_radius, flux=flux, trunc=4*half_light_radius)
-        disk = disk.shear(g1=e/2., g2=0.0)
-        disk = disk.rotate(theta_int*galsim.radians)
-        disk = disk.shear(g1=g1, g2=g2)
-        galObj = galsim.Convolution([disk, self.psf])
-        _image = galsim.Image(self.image.ngrid, self.image.ngrid, scale=self.image.pixScale)
-        newImage = galObj.drawImage(image=_image)
-        return newImage.array
+    # def simple_model(self, e, half_light_radius, theta_int, flux, g1=0., g2=0.):
+    #     '''Simple image model, only involves key parameters to describe an image
+    #         This function is used to find the major axis direction of image only data 
+    #     '''
+    #     disk = galsim.Sersic(n=1, half_light_radius=half_light_radius, flux=flux, trunc=4*half_light_radius)
+    #     disk = disk.shear(g1=e/2., g2=0.0)
+    #     disk = disk.rotate(theta_int*galsim.radians)
+    #     disk = disk.shear(g1=g1, g2=g2)
+    #     galObj = galsim.Convolution([disk, self.psf])
+    #     _image = galsim.Image(self.image.ngrid, self.image.ngrid, scale=self.image.pixScale)
+    #     newImage = galObj.drawImage(image=_image)
+    #     return newImage.array
     
     def cal_chi2(self, model):
         return np.sum((self.image.array-model)**2/self.image.array_var)
     
 
-    def _init_MCMC(self, active_par_key=['e_obs', 'r_hl_image', 'theta_int', 'flux'], par_fix={'g1':0., 'g2':0.}):
+    def _init_MCMC(self, active_par_key=['sini', 'r_hl_image', 'theta_int', 'flux'], par_fix={'g1':0., 'g2':0.}):
         self.active_par_key = active_par_key
         self.par_fix = par_fix
 
@@ -86,13 +92,14 @@ class ImageFit():
             if (pars[item] < self.par_lim[item][0] or pars[item] > self.par_lim[item][1]):
                 return -np.inf
         
-        modelImg = self.simple_model(e=pars['e_obs'], half_light_radius=pars['r_hl_image'], theta_int=pars['theta_int'], flux=pars['flux'], g1=pars['g1'], g2=pars['g2'])
+        #modelImg = self.simple_model(e=pars['e_obs'], half_light_radius=pars['r_hl_image'], theta_int=pars['theta_int'], flux=pars['flux'], g1=pars['g1'], g2=pars['g2'])
+        modelImg = self.forward_model(pars)
 
         logL_img = -0.5*self.cal_chi2(model=modelImg)
 
         return logL_img
 
-    def run_MCMC(self, Nwalker, Nsteps, active_par_key=['e_obs', 'r_hl_image', 'theta_int', 'flux'], par_fix={'g1': 0., 'g2': 0.}):
+    def run_MCMC(self, Nwalker, Nsteps, active_par_key=['sini', 'r_hl_image', 'theta_int', 'flux'], par_fix={'g1': 0., 'g2': 0.}):
 
         self._init_MCMC(active_par_key=active_par_key, par_fix=par_fix)
         Ndim = len(self.active_par_key)
