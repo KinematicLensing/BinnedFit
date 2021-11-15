@@ -34,9 +34,11 @@ class ImageFit():
 
         inclination = np.arcsin(pars['sini'])
         disk = galsim.inclined.InclinedSersic(n=1, inclination=inclination*galsim.radians,
-                                              half_light_radius=pars['r_hl_image'], scale_h_over_r=pars['aspect'], flux=pars['flux'],
+                                              half_light_radius=pars['r_hl_image'], scale_h_over_r=pars['aspect'], flux=pars['flux'], 
                                               trunc=4*pars['r_hl_image'])
 
+        disk = disk.shift(dx = pars['dx_gal'], dy = pars['dy_gal'])
+        
         #disk = galsim.Sersic(n=1, half_light_radius=pars['r_hl_image'], flux=pars['flux'], trunc=4*pars['r_hl_image'])
 
         #e = cal_e_int(sini=pars['sini'], q_z=pars['aspect'])
@@ -48,7 +50,8 @@ class ImageFit():
 
         galObj = galsim.Convolution([disk, self.psf])
 
-        image0 = galsim.Image(pars['ngrid'], pars['ngrid'], scale=pars['subGridPixScale'])
+        #image0 = galsim.Image(pars['ngrid'], pars['ngrid'], scale=pars['subGridPixScale'])
+        image0 = galsim.Image(pars['ngrid'], pars['ngrid'], scale=pars['pixScale'])
         image = galObj.drawImage(image=image0)
 
         return image.array
