@@ -49,10 +49,7 @@ class RotFitSingle:
         theta_0rotate = theta_0shear - pars['theta_int']
         phi = self._getPhi_faceOn(theta=theta_0rotate, sini=pars['sini'])
 
-        if (theta_0rotate > 1.5707963267948966) or (theta_0rotate < 0.):
-            R = np.flip(self.spec2D.spaceGrid)
-        else:
-            R = self.spec2D.spaceGrid
+        R = self.spec2D.spaceGrid
         
         peakV = pars['v_0'] + 2/np.pi*pars['vcirc']*pars['sini']*np.cos(phi) * np.arctan((R - pars['r_0'])/pars['vscale'])
 
@@ -73,7 +70,7 @@ class RotFitSingle:
             init_pt = [self.init_amp[pos_id], 3.0]
 
         try:
-            best_vals, covar = curve_fit(x0fixed_gaussian, self.spec2D.lambdaGrid, self.spec2D.array[pos_id], p0=init_pt, sigma=self.spec2D.array_var[pos_id], maxfev=1000)
+            best_vals, covar = curve_fit(x0fixed_gaussian, self.spec2D.lambdaGrid, self.spec2D.array[pos_id], p0=init_pt, sigma=self.spec2D.array_var[pos_id], maxfev=10000)
         except RuntimeError:
             print(f'RuntimeError for pos_id: {pos_id}. Set best-fit gaussian amp. = 0')
             best_vals = (0., 10.)
