@@ -17,7 +17,7 @@ from TNGcube import Image
 from KLtool import find_flux_norm
 from tfCube2 import TFCube, Parameters
 
-def gen_mock_tfCube(pars=None, line_species='Halpha', slits='both', noise_mode=0):
+def gen_mock_tfCube(pars=None, line_species='Halpha', slits='both', noise_mode=0, slitAngles=None):
 
     if pars is None:
         pars = Parameters()
@@ -27,8 +27,12 @@ def gen_mock_tfCube(pars=None, line_species='Halpha', slits='both', noise_mode=0
     eint_thy = cal_e_int(sini=pars['sini'], q_z=pars['aspect'])
     theta_obs = cal_theta_obs(g2=pars['g2'], e_int=eint_thy, theta_int=pars['theta_int'])
     
-    slitAng_major_p = theta_obs
-    slitAng_minor_p = theta_obs + np.pi / 2.
+    if slitAngles is None:
+        slitAng_major_p = theta_obs
+        slitAng_minor_p = theta_obs - np.pi / 2.
+    else:
+        slitAng_major_p = slitAngles[0]
+        slitAng_minor_p = slitAngles[1]
     
     if slits == 'major':
         pars['slitAngles'] = np.array([slitAng_major_p])
@@ -38,6 +42,8 @@ def gen_mock_tfCube(pars=None, line_species='Halpha', slits='both', noise_mode=0
         
     elif slits == 'both':
         pars['slitAngles'] = np.array([slitAng_major_p, slitAng_minor_p])
+    
+    print(f'Set slitAngles at: {slitAng_major_p*180/np.pi} and {slitAng_minor_p*180/np.pi}.')
         
     # ------ generate mock data ------
     TF = TFCube(pars=pars, line_species=line_species)
